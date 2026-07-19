@@ -6,6 +6,10 @@
       .replace(/^equipo\s*(\d+)$/i, "Equipo $1");
   }
 
+  function normalizePin(value) {
+    return String(value || "").trim();
+  }
+
   function photoKey(teamName, itemId) {
     return `${normalizeTeamName(teamName).toLowerCase()}::${itemId}`;
   }
@@ -34,7 +38,7 @@
     }).format(new Date(value));
   }
 
-  const core = { normalizeTeamName, photoKey, sortItems, completion, formatDate };
+  const core = { normalizeTeamName, normalizePin, photoKey, sortItems, completion, formatDate };
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = core;

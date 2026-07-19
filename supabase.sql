@@ -2,8 +2,11 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.teams (
   name text primary key,
+  pin text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table public.teams add column if not exists pin text not null default '';
 
 create table if not exists public.items (
   id uuid primary key default gen_random_uuid(),

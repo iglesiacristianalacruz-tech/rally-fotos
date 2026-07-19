@@ -3,6 +3,7 @@ const core = require("./app-core.js");
 
 assert.equal(core.normalizeTeamName(" equipo    2 "), "Equipo 2");
 assert.equal(core.normalizeTeamName("Brigada Norte"), "Brigada Norte");
+assert.equal(core.normalizePin(" 22090198 "), "22090198");
 assert.equal(core.photoKey(" EQUIPO 1 ", "abc"), "equipo 1::abc");
 
 const items = [

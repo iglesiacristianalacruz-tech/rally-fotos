@@ -16,7 +16,7 @@ Sin React, sin build step, sin app nativa.
 
 Abre `index.html` directamente para probar el flujo sin Supabase. En demo, los datos se guardan en el navegador.
 
-PIN admin default: `1234`.
+PIN admin: se configura en `config.js`.
 
 ## Setup real con Supabase
 
@@ -36,18 +36,25 @@ window.APP_CONFIG = {
 
 5. Sube esta carpeta a GitHub Pages.
 
+Si ya habias corrido el SQL antes de agregar PIN por equipo, ejecuta esta migracion una vez:
+
+```sql
+alter table public.teams add column if not exists pin text not null default '';
+```
+
 ## Uso
 
-- Equipo: escribe `Equipo 1`, `Equipo 2`, etc.
+- Admin: crea cada equipo y asigna su PIN.
+- Equipo: entra con nombre de equipo y PIN.
 - Equipo con internet: toma foto y se sube.
-- Equipo sin internet: toma foto, queda pendiente localmente y luego toca `Subir pendientes`.
+- Equipo sin internet: toma foto, queda guardada en ese celular y luego toca `Subir guardadas`.
 - Admin: entra con PIN, selecciona equipo, ve previews y puede borrar fotos.
 - Admin: desde el menu de cada equipo puede renombrarlo o eliminarlo con sus fotos.
 - Admin al editar un item: se eliminan las fotos de ese item para todos los equipos.
 
 ## Seguridad
 
-Este MVP usa PIN simple y politicas abiertas en Supabase porque no hay login de equipos ni backend propio.
+Este MVP usa PIN simple para admin/equipos y politicas abiertas en Supabase porque no hay login real ni backend propio.
 
 Sirve para un evento interno/controlado. Para uso publico, mueve las acciones admin y borrados a Supabase Edge Functions con secreto del servidor.
 

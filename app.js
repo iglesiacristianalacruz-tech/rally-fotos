@@ -25,9 +25,13 @@
   ];
   const demoSeedVersion = "caos-rally-v1";
 
+  const savedTeamName = localStorage.getItem("teamName") || "";
+  const savedTeamPin = localStorage.getItem("teamPin") || "";
+
   const state = {
-    mode: localStorage.getItem("teamName") ? "team" : "home",
-    teamName: localStorage.getItem("teamName") || "",
+    mode: savedTeamName && savedTeamPin ? "team" : "home",
+    teamName: savedTeamName,
+    teamPin: savedTeamPin,
     admin: sessionStorage.getItem("adminOk") === "1",
     selectedTeam: "",
     items: [],
@@ -35,6 +39,7 @@
     teams: [],
     pending: [],
     busy: false,
+    busyMessage: "",
     cameraItemId: "",
     modal: null,
     toast: "",
@@ -66,14 +71,18 @@
     const action = form.dataset.action;
     if (action === "enter-team") {
       const teamName = core.normalizeTeamName(new FormData(form).get("teamName"));
+      const pin = core.normalizePin(new FormData(form).get("teamPin"));
       if (!teamName) return toast("Escribe el equipo.");
+      if (!pin) return toast("Escribe el PIN del equipo.");
       run(async () => {
-        await store.ensureTeam(teamName);
+        await store.verifyTeamAccess(teamName, pin);
         localStorage.setItem("teamName", teamName);
+        localStorage.setItem("teamPin", pin);
         state.teamName = teamName;
+        state.teamPin = pin;
         state.mode = "team";
         await loadTeam();
-      });
+      }, "Entrando...");
     }
     if (action === "admin-login") {
       const pin = String(new FormData(form).get("pin") || "");
@@ -81,30 +90,30 @@
       sessionStorage.setItem("adminOk", "1");
       state.admin = true;
       state.mode = "admin";
-      run(loadAdmin);
+      run(loadAdmin, "Cargando admin...");
     }
-    if (action === "rename-team") {
+    if (action === "save-team") {
       const currentName = state.modal && state.modal.teamName;
       const nextName = core.normalizeTeamName(new FormData(form).get("teamName"));
-      if (!currentName) return;
-      if (!nextName || nextName === currentName) {
-        state.modal = null;
-        render();
-        return;
-      }
-      if (state.teams.some((team) => team.name === nextName)) return toast("Ese equipo ya existe.");
+      const pin = core.normalizePin(new FormData(form).get("teamPin"));
+      if (!nextName) return toast("Escribe el nombre del equipo.");
+      if (!pin) return toast("Escribe el PIN del equipo.");
+      if (state.teams.some((team) => team.name === nextName && team.name !== currentName)) return toast("Ese equipo ya existe.");
       run(async () => {
-        await store.renameTeam(currentName, nextName);
-        await renamePendingTeam(currentName, nextName);
+        if (currentName) await store.updateTeam(currentName, { name: nextName, pin });
+        else await store.createTeam({ name: nextName, pin });
+        if (currentName && currentName !== nextName) await renamePendingTeam(currentName, nextName);
         if (state.teamName === currentName) {
           state.teamName = nextName;
+          state.teamPin = pin;
           localStorage.setItem("teamName", nextName);
+          localStorage.setItem("teamPin", pin);
         }
         state.selectedTeam = nextName;
         state.modal = null;
         await loadAdmin();
-        toast("Equipo renombrado.");
-      });
+        toast(currentName ? "Equipo actualizado." : "Equipo creado.");
+      }, currentName ? "Guardando equipo..." : "Creando equipo...");
     }
   });
 
@@ -119,13 +128,15 @@
     }
     if (action === "logout-team") {
       localStorage.removeItem("teamName");
+      localStorage.removeItem("teamPin");
       state.teamName = "";
+      state.teamPin = "";
       state.mode = "home";
       render();
     }
     if (action === "show-admin") {
       state.mode = state.admin ? "admin" : "admin-login";
-      run(state.admin ? loadAdmin : async () => render());
+      run(state.admin ? loadAdmin : async () => render(), state.admin ? "Cargando admin..." : "Cargando...");
     }
     if (action === "logout-admin") {
       sessionStorage.removeItem("adminOk");
@@ -133,22 +144,30 @@
       state.mode = "home";
       render();
     }
-    if (action === "refresh-team") run(loadTeam);
-    if (action === "refresh-admin") run(loadAdmin);
+    if (action === "refresh-team") run(loadTeam, "Actualizando equipo...");
+    if (action === "refresh-admin") run(loadAdmin, "Actualizando admin...");
     if (action === "take-photo") openCamera(itemId);
     if (action === "delete-team-photo") deleteTeamPhoto(itemId);
-    if (action === "sync-pending") run(syncPendingPhotos);
+    if (action === "sync-pending") run(syncPendingPhotos, "Subiendo fotos guardadas...");
     if (action === "view-photo") openPhoto(itemId, control.dataset.source || "remote");
     if (action === "close-modal") {
+      if (control.classList.contains("modal-backdrop") && event.target !== control) return;
       state.modal = null;
       render();
+    }
+    if (action === "confirm-modal") {
+      const onConfirm = state.modal && state.modal.onConfirm;
+      state.modal = null;
+      render();
+      if (onConfirm) onConfirm();
     }
     if (action === "select-team") {
       state.selectedTeam = teamName;
       render();
     }
     if (action === "admin-delete-photo") adminDeletePhoto(itemId, teamName);
-    if (action === "rename-team") renameTeam(teamName);
+    if (action === "new-team") openTeamForm();
+    if (action === "edit-team") openTeamForm(teamName);
     if (action === "delete-team") deleteTeam(teamName);
     if (action === "add-item") addItem();
     if (action === "edit-item") editItem(itemId);
@@ -186,18 +205,19 @@
         }
       }
       await loadTeam();
-    });
+    }, "Subiendo foto...");
   });
 
   boot();
 
   async function boot() {
-    if (state.mode === "team") await run(loadTeam);
+    if (state.mode === "team") await run(loadTeam, "Cargando equipo...");
     else render();
   }
 
-  async function run(task) {
+  async function run(task, message = "Cargando...") {
     state.busy = true;
+    state.busyMessage = message;
     render();
     try {
       await task();
@@ -206,12 +226,13 @@
       toast(error.message || "Algo falló.");
     } finally {
       state.busy = false;
+      state.busyMessage = "";
       render();
     }
   }
 
   async function loadTeam() {
-    await store.ensureTeam(state.teamName);
+    await store.verifyTeamAccess(state.teamName, state.teamPin);
     state.items = core.sortItems(await store.listItems());
     state.photos = await store.listPhotos(state.teamName);
     state.pending = await listPendingPhotos(state.teamName);
@@ -248,13 +269,17 @@
             <input id="teamName" name="teamName" autocomplete="off" placeholder="Equipo 1">
           </div>
           <div class="form-row">
+            <label for="teamPin">PIN del equipo</label>
+            <input id="teamPin" name="teamPin" inputmode="numeric" type="password" autocomplete="off" placeholder="PIN">
+          </div>
+          <div class="form-row">
             <button class="primary" type="submit" ${disabled()}>Entrar</button>
           </div>
         </form>
         <div class="form-row">
           <button class="secondary" type="button" data-action="show-admin" ${disabled()}>Admin</button>
         </div>
-        <p class="muted small">${hasRemote ? "Modo real con Supabase" : "Modo demo local"}</p>
+        <p class="muted small">${hasRemote ? "Online" : "Modo demo local"}</p>
       </section>
     `);
   }
@@ -303,7 +328,10 @@
           </div>
           <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
         </div>
-        <button class="primary" type="button" data-action="sync-pending" ${pendingCount ? "" : "disabled"}>Subir pendientes (${pendingCount})</button>
+        <div class="pending-box">
+          <button class="primary" type="button" data-action="sync-pending" ${pendingCount && state.online ? "" : "disabled"}>Subir guardadas (${pendingCount})</button>
+          <p class="muted small">Si una foto se toma sin internet, queda guardada en este celular. Cuando vuelva la señal, este botón la sube a Online.</p>
+        </div>
       </section>
       <section class="item-list">
         ${state.items.map(renderTeamItem).join("") || `<div class="panel admin-section"><p class="muted">No hay items en la checklist.</p></div>`}
@@ -333,7 +361,7 @@
           </div>
           <p class="muted small">${current && current.uploaded_at ? core.formatDate(current.uploaded_at) : ""}</p>
         </div>
-        ${preview ? `<img class="photo-preview" src="${escapeAttr(preview)}" alt="Foto de ${escapeAttr(item.title)}">` : `<div class="photo-empty">Sin foto</div>`}
+        ${preview ? `<img class="photo-preview clickable-photo" src="${escapeAttr(preview)}" alt="Foto de ${escapeAttr(item.title)}" data-action="view-photo" data-item-id="${escapeAttr(item.id)}" data-source="${source}">` : `<div class="photo-empty">Sin foto</div>`}
         <div class="item-actions">
           ${preview ? `<button class="secondary" type="button" data-action="view-photo" data-item-id="${escapeAttr(item.id)}" data-source="${source}">Ver</button>` : ""}
           <button class="primary" type="button" data-action="take-photo" data-item-id="${escapeAttr(item.id)}" ${disabled()}>${preview ? "Reemplazar" : "Tomar foto"}</button>
@@ -358,7 +386,7 @@
           <details class="team-menu">
             <summary aria-label="Opciones de ${escapeAttr(team.name)}"><span aria-hidden="true">⋮</span></summary>
             <div class="team-menu-panel" role="menu">
-              <button type="button" role="menuitem" data-action="rename-team" data-team-name="${escapeAttr(team.name)}" ${disabled()}>Renombrar</button>
+              <button type="button" role="menuitem" data-action="edit-team" data-team-name="${escapeAttr(team.name)}" ${disabled()}>Editar</button>
               <button class="danger" type="button" role="menuitem" data-action="delete-team" data-team-name="${escapeAttr(team.name)}" ${disabled()}>Eliminar</button>
             </div>
           </details>
@@ -370,14 +398,17 @@
       ${topbar(
         "Admin",
         `
-          <span class="status-pill">${hasRemote ? "Supabase" : "Demo local"}</span>
+          <span class="status-pill">${hasRemote ? "Online" : "Demo local"}</span>
           <button class="secondary" type="button" data-action="refresh-admin" ${disabled()}>Refrescar</button>
           <button class="ghost" type="button" data-action="logout-admin">Salir</button>
         `
       )}
       <section class="admin-layout">
         <aside class="panel admin-section">
-          <h2>Equipos</h2>
+          <div class="item-head">
+            <h2>Equipos</h2>
+            <button class="primary compact-button" type="button" data-action="new-team" ${disabled()}>Crear</button>
+          </div>
           <div class="team-tabs">${teamTabs || `<p class="muted">Aun no hay equipos.</p>`}</div>
         </aside>
         <div class="admin-grid">
@@ -387,18 +418,22 @@
               ${selected ? state.items.map((item) => renderAdminPhoto(selected, item)).join("") : `<p class="muted">Selecciona un equipo.</p>`}
             </div>
           </section>
-          <section class="panel admin-section">
+          <details class="panel admin-section challenge-settings">
+            <summary>
+              <span>
+                <strong>Lista de retos</strong>
+                <small>La misma lista para todos los equipos</small>
+              </span>
+              <span>Editar</span>
+            </summary>
             <div class="item-head">
-              <div>
-                <h2>Lista de retos</h2>
-                <p class="muted small">Editar un item elimina las fotos subidas para ese item.</p>
-              </div>
+              <p class="muted small">Editar un item elimina las fotos subidas para ese item.</p>
               <button class="primary" type="button" data-action="add-item" ${disabled()}>Agregar</button>
             </div>
             <div class="editor-list">
               ${state.items.map(renderEditorItem).join("") || `<p class="muted">No hay items.</p>`}
             </div>
-          </section>
+          </details>
         </div>
       </section>
     `);
@@ -439,7 +474,20 @@
         ${content}
       </main>
       ${renderModal()}
+      ${renderBusy()}
       <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
+    `;
+  }
+
+  function renderBusy() {
+    if (!state.busy) return "";
+    return `
+      <div class="loading-backdrop" role="status" aria-live="polite">
+        <div class="loading-card">
+          <span class="spinner" aria-hidden="true"></span>
+          <strong>${escapeHtml(state.busyMessage || "Cargando...")}</strong>
+        </div>
+      </div>
     `;
   }
 
@@ -460,28 +508,47 @@
 
   function renderModal() {
     if (!state.modal) return "";
-    if (state.modal.type === "renameTeam") {
+    if (state.modal.type === "teamForm") {
+      const isEdit = Boolean(state.modal.teamName);
       return `
         <div class="modal-backdrop open" data-action="close-modal">
-          <section class="panel modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
-            <h2>Renombrar equipo</h2>
-            <form data-action="rename-team">
+          <section class="panel modal" role="dialog" aria-modal="true">
+            <h2>${isEdit ? "Editar equipo" : "Crear equipo"}</h2>
+            <form data-action="save-team">
               <div class="form-row">
-                <label for="renameTeamName">Nombre</label>
-                <input id="renameTeamName" name="teamName" autocomplete="off" value="${escapeAttr(state.modal.teamName)}">
+                <label for="teamFormName">Nombre</label>
+                <input id="teamFormName" name="teamName" autocomplete="off" placeholder="Equipo 1" value="${escapeAttr(state.modal.teamName || "")}">
+              </div>
+              <div class="form-row">
+                <label for="teamFormPin">PIN de acceso</label>
+                <input id="teamFormPin" name="teamPin" inputmode="numeric" type="text" autocomplete="off" placeholder="1234" value="${escapeAttr(state.modal.pin || "")}">
               </div>
               <div class="modal-actions">
                 <button class="ghost" type="button" data-action="close-modal">Cancelar</button>
-                <button class="primary" type="submit" ${disabled()}>Guardar</button>
+                <button class="primary" type="submit" ${disabled()}>${isEdit ? "Guardar" : "Crear"}</button>
               </div>
             </form>
           </section>
         </div>
       `;
     }
+    if (state.modal.type === "confirm") {
+      return `
+        <div class="modal-backdrop open" data-action="close-modal">
+          <section class="panel modal" role="dialog" aria-modal="true">
+            <h2>${escapeHtml(state.modal.title || "Confirmar")}</h2>
+            <p class="modal-copy">${escapeHtml(state.modal.message || "Esta accion no se puede deshacer.")}</p>
+            <div class="modal-actions">
+              <button class="ghost" type="button" data-action="close-modal">Cancelar</button>
+              <button class="${state.modal.danger ? "danger" : "primary"}" type="button" data-action="confirm-modal" ${disabled()}>${escapeHtml(state.modal.confirmLabel || "Confirmar")}</button>
+            </div>
+          </section>
+        </div>
+      `;
+    }
     return `
       <div class="modal-backdrop open" data-action="close-modal">
-        <section class="panel modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <section class="panel modal" role="dialog" aria-modal="true">
           <img src="${escapeAttr(state.modal.url)}" alt="${escapeAttr(state.modal.title)}">
           <div class="form-row">
             <button class="secondary" type="button" data-action="close-modal">Cerrar</button>
@@ -508,55 +575,73 @@
       photo = state.photos.find((entry) => entry.item_id === itemId);
     }
     if (!photo || !photo.previewUrl) return;
-    state.modal = { url: photo.previewUrl, title: item ? item.title : "Foto" };
+    state.modal = { type: "photo", url: photo.previewUrl, title: item ? item.title : "Foto" };
     render();
   }
 
   function deleteTeamPhoto(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
-    if (!confirm(`Eliminar la foto de "${item.title}"?`)) return;
-    run(async () => {
-      const pending = state.pending.find((entry) => entry.itemId === itemId);
-      if (pending) await deletePendingPhoto(core.photoKey(state.teamName, itemId));
-      const remotePhoto = state.photos.find((entry) => entry.item_id === itemId);
-      if (remotePhoto) await store.deletePhoto(remotePhoto);
-      await loadTeam();
-      toast("Foto eliminada.");
+    confirmModal({
+      title: "Eliminar foto",
+      message: `Se borrará la foto de "${item.title}".`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      onConfirm: () => run(async () => {
+        const pending = state.pending.find((entry) => entry.itemId === itemId);
+        if (pending) await deletePendingPhoto(core.photoKey(state.teamName, itemId));
+        const remotePhoto = state.photos.find((entry) => entry.item_id === itemId);
+        if (remotePhoto) await store.deletePhoto(remotePhoto);
+        await loadTeam();
+        toast("Foto eliminada.");
+      }, "Eliminando foto...")
     });
   }
 
   function adminDeletePhoto(itemId, teamName) {
     const photo = state.photos.find((entry) => entry.team_name === teamName && entry.item_id === itemId);
     if (!photo) return;
-    if (!confirm(`Borrar esta foto de ${teamName}?`)) return;
-    run(async () => {
-      await store.deletePhoto(photo);
-      await loadAdmin();
-      toast("Foto borrada.");
+    confirmModal({
+      title: "Borrar foto",
+      message: `Se borrará esta foto de ${teamName}.`,
+      confirmLabel: "Borrar",
+      danger: true,
+      onConfirm: () => run(async () => {
+        await store.deletePhoto(photo);
+        await loadAdmin();
+        toast("Foto borrada.");
+      }, "Borrando foto...")
     });
   }
 
-  function renameTeam(teamName) {
-    const currentName = core.normalizeTeamName(teamName);
+  function openTeamForm(teamName) {
+    const currentName = teamName ? core.normalizeTeamName(teamName) : "";
+    const team = state.teams.find((entry) => entry.name === currentName);
     closeTeamMenus();
-    state.modal = { type: "renameTeam", teamName: currentName };
+    state.modal = { type: "teamForm", teamName: currentName, pin: team && team.pin ? team.pin : "" };
     render();
   }
 
   function deleteTeam(teamName) {
     const name = core.normalizeTeamName(teamName);
-    if (!confirm(`Eliminar ${name} y todas sus fotos?`)) return;
-    run(async () => {
-      await store.deleteTeam(name);
-      await deletePendingForTeam(name);
-      if (state.teamName === name) {
-        state.teamName = "";
-        localStorage.removeItem("teamName");
-      }
-      state.selectedTeam = "";
-      await loadAdmin();
-      toast("Equipo eliminado.");
+    confirmModal({
+      title: "Eliminar equipo",
+      message: `Se eliminará ${name} y todas sus fotos.`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      onConfirm: () => run(async () => {
+        await store.deleteTeam(name);
+        await deletePendingForTeam(name);
+        if (state.teamName === name) {
+          state.teamName = "";
+          state.teamPin = "";
+          localStorage.removeItem("teamName");
+          localStorage.removeItem("teamPin");
+        }
+        state.selectedTeam = "";
+        await loadAdmin();
+        toast("Equipo eliminado.");
+      }, "Eliminando equipo...")
     });
   }
 
@@ -575,25 +660,40 @@
     if (!item) return;
     const title = prompt("Editar item", item.title);
     if (!title || !title.trim() || title.trim() === item.title) return;
-    if (!confirm("Editar este item eliminará las fotos subidas para este item en todos los equipos. Continuar?")) return;
-    run(async () => {
-      await store.updateItem(item, title.trim());
-      await deletePendingForItem(item.id);
-      await loadAdmin();
-      toast("Item actualizado.");
+    confirmModal({
+      title: "Editar reto",
+      message: "Editar este reto eliminará las fotos subidas para este reto en todos los equipos.",
+      confirmLabel: "Editar",
+      danger: true,
+      onConfirm: () => run(async () => {
+        await store.updateItem(item, title.trim());
+        await deletePendingForItem(item.id);
+        await loadAdmin();
+        toast("Item actualizado.");
+      }, "Actualizando reto...")
     });
   }
 
   function deleteItem(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
-    if (!confirm(`Borrar "${item.title}" y sus fotos?`)) return;
-    run(async () => {
-      await store.deleteItem(item);
-      await deletePendingForItem(item.id);
-      await loadAdmin();
-      toast("Item borrado.");
+    confirmModal({
+      title: "Borrar reto",
+      message: `Se borrará "${item.title}" y sus fotos en todos los equipos.`,
+      confirmLabel: "Borrar",
+      danger: true,
+      onConfirm: () => run(async () => {
+        await store.deleteItem(item);
+        await deletePendingForItem(item.id);
+        await loadAdmin();
+        toast("Item borrado.");
+      }, "Borrando reto...")
     });
+  }
+
+  function confirmModal(options) {
+    state.modal = { type: "confirm", ...options };
+    render();
   }
 
   async function syncPendingPhotos() {
@@ -646,22 +746,30 @@
         return data || [];
       },
       async listTeams() {
-        const { data, error } = await supabase.from("teams").select("*").order("name", { ascending: true });
-        if (error) throw error;
+        const { data, error } = await supabase.from("teams").select("name,pin,created_at").order("name", { ascending: true });
+        if (error) throw friendlySupabaseError(error);
         return data || [];
       },
-      async ensureTeam(teamName) {
+      async verifyTeamAccess(teamName, pin) {
         const name = core.normalizeTeamName(teamName);
-        const { error } = await supabase.from("teams").upsert({ name }, { onConflict: "name" });
-        if (error) throw error;
+        const accessPin = core.normalizePin(pin);
+        const { data, error } = await supabase.from("teams").select("name,pin").eq("name", name).maybeSingle();
+        if (error) throw friendlySupabaseError(error);
+        if (!data || String(data.pin) !== accessPin) throw new Error("Equipo o PIN incorrecto.");
       },
-      async renameTeam(oldName, newName) {
-        const { error: insertError } = await supabase.from("teams").insert({ name: newName });
-        if (insertError) throw insertError;
-        const { error: photosError } = await supabase.from("photos").update({ team_name: newName }).eq("team_name", oldName);
-        if (photosError) throw photosError;
-        const { error } = await supabase.from("teams").delete().eq("name", oldName);
-        if (error) throw error;
+      async createTeam({ name, pin }) {
+        const { error } = await supabase.from("teams").insert({
+          name: core.normalizeTeamName(name),
+          pin: core.normalizePin(pin)
+        });
+        if (error) throw friendlySupabaseError(error);
+      },
+      async updateTeam(oldName, { name, pin }) {
+        const { error } = await supabase
+          .from("teams")
+          .update({ name: core.normalizeTeamName(name), pin: core.normalizePin(pin) })
+          .eq("name", oldName);
+        if (error) throw friendlySupabaseError(error);
       },
       async deleteTeam(teamName) {
         const { data, error } = await supabase.from("photos").select("storage_path").eq("team_name", teamName);
@@ -770,6 +878,14 @@
     if (error) throw error;
   }
 
+  function friendlySupabaseError(error) {
+    const message = String(error && error.message || "");
+    if (/pin/i.test(message) && /(column|schema|not find|does not exist)/i.test(message)) {
+      return new Error("Falta aplicar la migración de PIN en Supabase. Ejecuta el ALTER TABLE indicado en el README.");
+    }
+    return error;
+  }
+
   function createDemoStore() {
     return {
       async listItems() {
@@ -778,18 +894,26 @@
       async listTeams() {
         return getDemoTeams();
       },
-      async ensureTeam(teamName) {
+      async verifyTeamAccess(teamName, pin) {
         const name = core.normalizeTeamName(teamName);
-        const teams = getDemoTeams();
-        if (!teams.some((team) => team.name === name)) {
-          localStorage.setItem("demoTeams", JSON.stringify([...teams, { name }]));
-        }
+        const accessPin = core.normalizePin(pin);
+        const team = getDemoTeams().find((entry) => entry.name === name);
+        if (!team || String(team.pin) !== accessPin) throw new Error("Equipo o PIN incorrecto.");
       },
-      async renameTeam(oldName, newName) {
+      async createTeam({ name, pin }) {
         localStorage.setItem(
           "demoTeams",
-          JSON.stringify(getDemoTeams().map((team) => (team.name === oldName ? { name: newName } : team)))
+          JSON.stringify([...getDemoTeams(), { name: core.normalizeTeamName(name), pin: core.normalizePin(pin) }])
         );
+      },
+      async updateTeam(oldName, { name, pin }) {
+        const newName = core.normalizeTeamName(name);
+        const newPin = core.normalizePin(pin);
+        localStorage.setItem(
+          "demoTeams",
+          JSON.stringify(getDemoTeams().map((team) => (team.name === oldName ? { name: newName, pin: newPin } : team)))
+        );
+        if (oldName === newName) return;
         const photos = await idbAll("demoPhotos");
         await Promise.all(
           photos
@@ -870,8 +994,11 @@
 
   function getDemoTeams() {
     const saved = localStorage.getItem("demoTeams");
-    if (saved) return JSON.parse(saved);
-    const teams = ["Equipo 1", "Equipo 2", "Equipo 3", "Equipo 4"].map((name) => ({ name }));
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.map((team, index) => ({ ...team, pin: team.pin || String(index + 1).repeat(4) }));
+    }
+    const teams = ["Equipo 1", "Equipo 2", "Equipo 3", "Equipo 4"].map((name, index) => ({ name, pin: String(index + 1).repeat(4) }));
     localStorage.setItem("demoTeams", JSON.stringify(teams));
     return teams;
   }
