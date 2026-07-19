@@ -24,8 +24,6 @@
     "Foto en el lugar más alto de el campamento. (LA TORRE NO CUENTA)"
   ];
   const demoSeedVersion = "caos-rally-v1";
-  const ADMIN_REFRESH_MS = 30000;
-  let adminRefreshTimer = 0;
 
   const savedTeamName = localStorage.getItem("teamName") || "";
   const savedTeamPin = localStorage.getItem("teamPin") || "";
@@ -38,7 +36,6 @@
     selectedTeam: "",
     loginTeam: "",
     adminLastRefreshAt: null,
-    adminRefreshing: false,
     items: [],
     photos: [],
     teams: [],
@@ -63,10 +60,6 @@
     state.online = false;
     toast("Sin internet. Las fotos se guardan en este celular.");
     render();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.mode === "admin" && state.admin && !state.modal && !state.busy) autoRefreshAdmin();
   });
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
@@ -232,34 +225,6 @@
     else await run(loadHome, "Cargando equipos...");
   }
 
-  async function autoRefreshAdmin() {
-    window.clearTimeout(adminRefreshTimer);
-    adminRefreshTimer = 0;
-    if (state.mode !== "admin" || !state.admin) return;
-    if (document.hidden || state.modal || state.busy || state.adminRefreshing) {
-      syncAdminAutoRefresh();
-      return;
-    }
-    state.adminRefreshing = true;
-    render();
-    try {
-      await loadAdmin();
-    } catch (error) {
-      console.error(error);
-      toast("No se pudo actualizar admin.");
-    } finally {
-      state.adminRefreshing = false;
-      render();
-    }
-  }
-
-  function syncAdminAutoRefresh() {
-    window.clearTimeout(adminRefreshTimer);
-    adminRefreshTimer = 0;
-    if (state.mode !== "admin" || !state.admin) return;
-    adminRefreshTimer = window.setTimeout(autoRefreshAdmin, ADMIN_REFRESH_MS);
-  }
-
   async function run(task, message = "Cargando...") {
     state.busy = true;
     state.busyMessage = message;
@@ -303,7 +268,6 @@
     else if (state.mode === "admin-login") renderAdminLogin();
     else if (state.mode === "admin") renderAdmin();
     else renderHome();
-    syncAdminAutoRefresh();
   }
 
   function renderHome() {
@@ -461,7 +425,6 @@
         "Admin",
         `
           <span class="status-pill">${hasRemote ? "Online" : "Demo local"}</span>
-          <span class="status-pill ${state.adminRefreshing ? "warn" : ""}">${state.adminRefreshing ? "Actualizando" : "Auto 30s"}</span>
           <span class="admin-refresh-text">${state.adminLastRefreshAt ? `Actualizado ${formatRelativeTime(state.adminLastRefreshAt)}` : "Sin actualizar"}</span>
           <button class="secondary" type="button" data-action="refresh-admin" ${disabled()}>Refrescar</button>
           <button class="ghost" type="button" data-action="logout-admin">Salir</button>
@@ -469,7 +432,7 @@
       )}
       <section class="admin-layout">
         <aside class="panel admin-section">
-          <div class="item-head">
+          <div class="item-head admin-section-head">
             <h2>Equipos</h2>
             <button class="primary compact-button" type="button" data-action="new-team" ${disabled()}>Crear</button>
           </div>
@@ -477,7 +440,6 @@
         </aside>
         <div class="admin-grid">
           ${renderAdminOverview()}
-          ${renderProgressMatrix()}
           <section class="panel admin-section">
             <h2>${selected ? escapeHtml(selected) : "Revisión"}</h2>
             <div class="admin-photo-grid">
@@ -518,9 +480,9 @@
         <div class="overview-head">
           <div>
             <h2>Progreso en vivo</h2>
-            <p class="muted small">El admin se actualiza cada 30s mientras esta pantalla esté abierta.</p>
+            <p class="muted small">Usa Refrescar para traer las fotos nuevas durante el evento.</p>
           </div>
-          <span class="status-pill ${state.adminRefreshing ? "warn" : ""}">${state.adminRefreshing ? "Actualizando" : "En seguimiento"}</span>
+          <span class="status-pill">Actualizado</span>
         </div>
         <div class="overview-stats">
           <div class="stat-box">
@@ -544,50 +506,6 @@
           <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
         </div>
         <p class="muted small">${latestPhoto ? `Última foto: ${escapeHtml(latestPhoto.team_name)} · ${formatRelativeTime(latestPhoto.uploaded_at)}` : "Aún no hay fotos subidas."}</p>
-      </section>
-    `;
-  }
-
-  function renderProgressMatrix() {
-    if (!state.teams.length || !state.items.length) return "";
-    const columns = `grid-template-columns:minmax(118px,1.2fr) repeat(${state.items.length},42px)`;
-    const headers = state.items.map((item, index) => `
-      <div class="matrix-head" title="${escapeAttr(item.title)}">${index + 1}</div>
-    `).join("");
-    const rows = state.teams.map((team) => {
-      const count = adminPhotoCount(team.name);
-      const cells = state.items.map((item, index) => {
-        const photo = adminPhotoFor(team.name, item.id);
-        if (!photo) {
-          return `<div class="matrix-cell empty" aria-label="${escapeAttr(`${team.name}, reto ${index + 1} sin foto`)}"></div>`;
-        }
-        return `
-          <button class="matrix-cell complete" type="button" data-action="view-photo" data-team-name="${escapeAttr(team.name)}" data-item-id="${escapeAttr(item.id)}" aria-label="${escapeAttr(`${team.name}, reto ${index + 1} con foto`)}">✓</button>
-        `;
-      }).join("");
-      return `
-        <div class="matrix-row" style="${columns}">
-          <button class="matrix-team" type="button" data-action="select-team" data-team-name="${escapeAttr(team.name)}">
-            <strong>${escapeHtml(team.name)}</strong>
-            <small>${count}/${state.items.length}</small>
-          </button>
-          ${cells}
-        </div>
-      `;
-    }).join("");
-    return `
-      <section class="panel admin-section progress-matrix">
-        <div class="item-head">
-          <h2>Mapa de fotos</h2>
-          <span class="muted small">${state.items.length} retos</span>
-        </div>
-        <div class="matrix-scroll" role="region" aria-label="Mapa de progreso por equipo">
-          <div class="matrix-header" style="${columns}">
-            <div></div>
-            ${headers}
-          </div>
-          ${rows}
-        </div>
       </section>
     `;
   }

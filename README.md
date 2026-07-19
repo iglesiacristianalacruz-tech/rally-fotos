@@ -49,7 +49,7 @@ alter table public.teams add column if not exists pin text not null default '';
 - Equipo con internet: toma foto y se sube.
 - Equipo sin internet: toma foto, queda guardada en ese celular y luego toca `Subir guardadas`.
 - Admin: entra con PIN, selecciona equipo, ve previews y puede borrar fotos.
-- Admin: el panel se refresca automaticamente cada 30s mientras esta abierto.
+- Admin: el panel muestra hace cuanto se actualizo y puede refrescarse manualmente.
 - Admin: desde el menu de cada equipo puede renombrarlo o eliminarlo con sus fotos.
 - Admin al editar un item: se eliminan las fotos de ese item para todos los equipos.
 

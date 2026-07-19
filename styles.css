@@ -566,6 +566,16 @@ textarea {
   overflow: visible;
 }
 
+.admin-section-head {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.admin-section-head h2 {
+  margin: 0;
+}
+
 .admin-overview {
   display: grid;
   gap: 12px;
@@ -742,79 +752,6 @@ textarea {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
-}
-
-.progress-matrix {
-  display: grid;
-  gap: 10px;
-}
-
-.matrix-scroll {
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.matrix-header,
-.matrix-row {
-  display: grid;
-  min-width: max-content;
-  align-items: center;
-  gap: 6px;
-}
-
-.matrix-row {
-  margin-top: 6px;
-}
-
-.matrix-head,
-.matrix-cell {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  min-height: 42px;
-  place-items: center;
-  border: 2px solid rgba(32, 63, 46, 0.5);
-  border-radius: 8px;
-  font-weight: 1000;
-}
-
-.matrix-head {
-  background: rgba(255, 253, 246, 0.66);
-  color: var(--primary);
-  font-size: 0.82rem;
-}
-
-.matrix-cell {
-  box-shadow: none;
-  text-transform: none;
-}
-
-.matrix-cell.complete {
-  background: var(--primary);
-  color: #fffdf6;
-}
-
-.matrix-cell.empty {
-  background: rgba(255, 253, 246, 0.54);
-}
-
-.matrix-team {
-  display: grid;
-  min-height: 42px;
-  align-content: center;
-  gap: 2px;
-  padding: 6px 8px;
-  background: transparent;
-  color: var(--primary-dark);
-  box-shadow: none;
-  text-align: left;
-  text-transform: none;
-}
-
-.matrix-team small {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 900;
 }
 
 .admin-photo {
