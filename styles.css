@@ -178,6 +178,14 @@ textarea {
   gap: 8px;
 }
 
+.admin-refresh-text {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .panel {
   border: 2px solid var(--primary);
   border-radius: 8px;
@@ -558,6 +566,56 @@ textarea {
   overflow: visible;
 }
 
+.admin-overview {
+  display: grid;
+  gap: 12px;
+}
+
+.overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.overview-head h2 {
+  margin-bottom: 4px;
+}
+
+.overview-head p,
+.admin-overview p {
+  margin: 0;
+}
+
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.stat-box {
+  min-width: 0;
+  border-left: 4px solid var(--accent);
+  padding: 4px 0 4px 10px;
+}
+
+.stat-box span {
+  display: block;
+  color: var(--primary);
+  font-size: 1.35rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.stat-box small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .team-tabs {
   position: relative;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -595,6 +653,21 @@ textarea {
   color: var(--text);
   text-align: left;
   box-shadow: none;
+}
+
+.mini-progress {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(32, 63, 46, 0.48);
+  border-radius: 999px;
+  background: rgba(255, 253, 246, 0.7);
+}
+
+.mini-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
 }
 
 .team-menu {
@@ -669,6 +742,79 @@ textarea {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
+}
+
+.progress-matrix {
+  display: grid;
+  gap: 10px;
+}
+
+.matrix-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.matrix-header,
+.matrix-row {
+  display: grid;
+  min-width: max-content;
+  align-items: center;
+  gap: 6px;
+}
+
+.matrix-row {
+  margin-top: 6px;
+}
+
+.matrix-head,
+.matrix-cell {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  place-items: center;
+  border: 2px solid rgba(32, 63, 46, 0.5);
+  border-radius: 8px;
+  font-weight: 1000;
+}
+
+.matrix-head {
+  background: rgba(255, 253, 246, 0.66);
+  color: var(--primary);
+  font-size: 0.82rem;
+}
+
+.matrix-cell {
+  box-shadow: none;
+  text-transform: none;
+}
+
+.matrix-cell.complete {
+  background: var(--primary);
+  color: #fffdf6;
+}
+
+.matrix-cell.empty {
+  background: rgba(255, 253, 246, 0.54);
+}
+
+.matrix-team {
+  display: grid;
+  min-height: 42px;
+  align-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--primary-dark);
+  box-shadow: none;
+  text-align: left;
+  text-transform: none;
+}
+
+.matrix-team small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 
 .admin-photo {

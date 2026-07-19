@@ -24,6 +24,8 @@
     "Foto en el lugar más alto de el campamento. (LA TORRE NO CUENTA)"
   ];
   const demoSeedVersion = "caos-rally-v1";
+  const ADMIN_REFRESH_MS = 30000;
+  let adminRefreshTimer = 0;
 
   const savedTeamName = localStorage.getItem("teamName") || "";
   const savedTeamPin = localStorage.getItem("teamPin") || "";
@@ -35,6 +37,8 @@
     admin: sessionStorage.getItem("adminOk") === "1",
     selectedTeam: "",
     loginTeam: "",
+    adminLastRefreshAt: null,
+    adminRefreshing: false,
     items: [],
     photos: [],
     teams: [],
@@ -59,6 +63,10 @@
     state.online = false;
     toast("Sin internet. Las fotos se guardan en este celular.");
     render();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.mode === "admin" && state.admin && !state.modal && !state.busy) autoRefreshAdmin();
   });
 
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
@@ -158,7 +166,7 @@
     if (action === "take-photo") openCamera(itemId);
     if (action === "delete-team-photo") deleteTeamPhoto(itemId);
     if (action === "sync-pending") run(syncPendingPhotos, "Subiendo fotos guardadas...");
-    if (action === "view-photo") openPhoto(itemId, control.dataset.source || "remote");
+    if (action === "view-photo") openPhoto(itemId, control.dataset.source || "remote", teamName);
     if (action === "close-modal") {
       if (control.classList.contains("modal-backdrop") && event.target !== control) return;
       state.modal = null;
@@ -224,6 +232,34 @@
     else await run(loadHome, "Cargando equipos...");
   }
 
+  async function autoRefreshAdmin() {
+    window.clearTimeout(adminRefreshTimer);
+    adminRefreshTimer = 0;
+    if (state.mode !== "admin" || !state.admin) return;
+    if (document.hidden || state.modal || state.busy || state.adminRefreshing) {
+      syncAdminAutoRefresh();
+      return;
+    }
+    state.adminRefreshing = true;
+    render();
+    try {
+      await loadAdmin();
+    } catch (error) {
+      console.error(error);
+      toast("No se pudo actualizar admin.");
+    } finally {
+      state.adminRefreshing = false;
+      render();
+    }
+  }
+
+  function syncAdminAutoRefresh() {
+    window.clearTimeout(adminRefreshTimer);
+    adminRefreshTimer = 0;
+    if (state.mode !== "admin" || !state.admin) return;
+    adminRefreshTimer = window.setTimeout(autoRefreshAdmin, ADMIN_REFRESH_MS);
+  }
+
   async function run(task, message = "Cargando...") {
     state.busy = true;
     state.busyMessage = message;
@@ -257,14 +293,17 @@
     state.items = core.sortItems(await store.listItems());
     state.teams = await store.listTeams();
     state.photos = await store.listAllPhotos();
+    if (!state.teams.some((team) => team.name === state.selectedTeam)) state.selectedTeam = "";
     if (!state.selectedTeam && state.teams[0]) state.selectedTeam = state.teams[0].name;
+    state.adminLastRefreshAt = Date.now();
   }
 
   function render() {
-    if (state.mode === "team") return renderTeam();
-    if (state.mode === "admin-login") return renderAdminLogin();
-    if (state.mode === "admin") return renderAdmin();
-    return renderHome();
+    if (state.mode === "team") renderTeam();
+    else if (state.mode === "admin-login") renderAdminLogin();
+    else if (state.mode === "admin") renderAdmin();
+    else renderHome();
+    syncAdminAutoRefresh();
   }
 
   function renderHome() {
@@ -397,12 +436,14 @@
     const selected = state.selectedTeam || (state.teams[0] && state.teams[0].name) || "";
     const teamTabs = state.teams.map((team) => {
       const total = state.items.length;
-      const count = state.photos.filter((photo) => photo.team_name === team.name).length;
+      const count = adminPhotoCount(team.name);
+      const percent = total ? Math.round((count / total) * 100) : 0;
       return `
         <div class="team-card ${selected === team.name ? "active" : ""}">
           <button class="team-tab" type="button" data-action="select-team" data-team-name="${escapeAttr(team.name)}">
             <strong>${escapeHtml(team.name)}</strong>
             <span class="muted small">${count}/${total} fotos</span>
+            <span class="mini-progress" aria-hidden="true"><span style="width:${percent}%"></span></span>
           </button>
           <details class="team-menu">
             <summary aria-label="Opciones de ${escapeAttr(team.name)}"><span aria-hidden="true">⋮</span></summary>
@@ -420,6 +461,8 @@
         "Admin",
         `
           <span class="status-pill">${hasRemote ? "Online" : "Demo local"}</span>
+          <span class="status-pill ${state.adminRefreshing ? "warn" : ""}">${state.adminRefreshing ? "Actualizando" : "Auto 30s"}</span>
+          <span class="admin-refresh-text">${state.adminLastRefreshAt ? `Actualizado ${formatRelativeTime(state.adminLastRefreshAt)}` : "Sin actualizar"}</span>
           <button class="secondary" type="button" data-action="refresh-admin" ${disabled()}>Refrescar</button>
           <button class="ghost" type="button" data-action="logout-admin">Salir</button>
         `
@@ -433,6 +476,8 @@
           <div class="team-tabs">${teamTabs || `<p class="muted">Aun no hay equipos.</p>`}</div>
         </aside>
         <div class="admin-grid">
+          ${renderAdminOverview()}
+          ${renderProgressMatrix()}
           <section class="panel admin-section">
             <h2>${selected ? escapeHtml(selected) : "Revisión"}</h2>
             <div class="admin-photo-grid">
@@ -460,8 +505,116 @@
     `);
   }
 
+  function renderAdminOverview() {
+    const totalSlots = state.teams.length * state.items.length;
+    const completed = state.teams.reduce((sum, team) => sum + adminPhotoCount(team.name), 0);
+    const percent = totalSlots ? Math.round((completed / totalSlots) * 100) : 0;
+    const completedTeams = state.items.length
+      ? state.teams.filter((team) => adminPhotoCount(team.name) === state.items.length).length
+      : 0;
+    const latestPhoto = latestAdminPhoto();
+    return `
+      <section class="panel admin-section admin-overview" aria-live="polite">
+        <div class="overview-head">
+          <div>
+            <h2>Progreso en vivo</h2>
+            <p class="muted small">El admin se actualiza cada 30s mientras esta pantalla esté abierta.</p>
+          </div>
+          <span class="status-pill ${state.adminRefreshing ? "warn" : ""}">${state.adminRefreshing ? "Actualizando" : "En seguimiento"}</span>
+        </div>
+        <div class="overview-stats">
+          <div class="stat-box">
+            <span>${completed}/${totalSlots || 0}</span>
+            <small>Fotos totales</small>
+          </div>
+          <div class="stat-box">
+            <span>${percent}%</span>
+            <small>Avance general</small>
+          </div>
+          <div class="stat-box">
+            <span>${completedTeams}/${state.teams.length}</span>
+            <small>Equipos completos</small>
+          </div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label">
+            <span>Avance total</span>
+            <strong>${percent}%</strong>
+          </div>
+          <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        </div>
+        <p class="muted small">${latestPhoto ? `Última foto: ${escapeHtml(latestPhoto.team_name)} · ${formatRelativeTime(latestPhoto.uploaded_at)}` : "Aún no hay fotos subidas."}</p>
+      </section>
+    `;
+  }
+
+  function renderProgressMatrix() {
+    if (!state.teams.length || !state.items.length) return "";
+    const columns = `grid-template-columns:minmax(118px,1.2fr) repeat(${state.items.length},42px)`;
+    const headers = state.items.map((item, index) => `
+      <div class="matrix-head" title="${escapeAttr(item.title)}">${index + 1}</div>
+    `).join("");
+    const rows = state.teams.map((team) => {
+      const count = adminPhotoCount(team.name);
+      const cells = state.items.map((item, index) => {
+        const photo = adminPhotoFor(team.name, item.id);
+        if (!photo) {
+          return `<div class="matrix-cell empty" aria-label="${escapeAttr(`${team.name}, reto ${index + 1} sin foto`)}"></div>`;
+        }
+        return `
+          <button class="matrix-cell complete" type="button" data-action="view-photo" data-team-name="${escapeAttr(team.name)}" data-item-id="${escapeAttr(item.id)}" aria-label="${escapeAttr(`${team.name}, reto ${index + 1} con foto`)}">✓</button>
+        `;
+      }).join("");
+      return `
+        <div class="matrix-row" style="${columns}">
+          <button class="matrix-team" type="button" data-action="select-team" data-team-name="${escapeAttr(team.name)}">
+            <strong>${escapeHtml(team.name)}</strong>
+            <small>${count}/${state.items.length}</small>
+          </button>
+          ${cells}
+        </div>
+      `;
+    }).join("");
+    return `
+      <section class="panel admin-section progress-matrix">
+        <div class="item-head">
+          <h2>Mapa de fotos</h2>
+          <span class="muted small">${state.items.length} retos</span>
+        </div>
+        <div class="matrix-scroll" role="region" aria-label="Mapa de progreso por equipo">
+          <div class="matrix-header" style="${columns}">
+            <div></div>
+            ${headers}
+          </div>
+          ${rows}
+        </div>
+      </section>
+    `;
+  }
+
+  function adminPhotoFor(teamName, itemId) {
+    return state.photos.find((entry) => entry.team_name === teamName && entry.item_id === itemId);
+  }
+
+  function adminPhotoCount(teamName) {
+    const itemIds = new Set(state.items.map((item) => item.id));
+    const done = new Set();
+    state.photos.forEach((photo) => {
+      if (photo.team_name === teamName && itemIds.has(photo.item_id)) done.add(photo.item_id);
+    });
+    return done.size;
+  }
+
+  function latestAdminPhoto() {
+    return state.photos.reduce((latest, photo) => {
+      if (!photo.uploaded_at) return latest;
+      if (!latest || new Date(photo.uploaded_at) > new Date(latest.uploaded_at)) return photo;
+      return latest;
+    }, null);
+  }
+
   function renderAdminPhoto(teamName, item) {
-    const photo = state.photos.find((entry) => entry.team_name === teamName && entry.item_id === item.id);
+    const photo = adminPhotoFor(teamName, item.id);
     return `
       <article class="admin-photo">
         <h3>${escapeHtml(item.title)}</h3>
@@ -606,13 +759,14 @@
     cameraInput.click();
   }
 
-  function openPhoto(itemId, source) {
+  function openPhoto(itemId, source, teamName) {
     const item = state.items.find((entry) => entry.id === itemId);
     let photo;
     if (source === "pending") {
       photo = state.pending.find((entry) => entry.itemId === itemId);
     } else if (state.mode === "admin") {
-      photo = state.photos.find((entry) => entry.team_name === state.selectedTeam && entry.item_id === itemId);
+      const reviewTeam = core.normalizeTeamName(teamName || state.selectedTeam);
+      photo = state.photos.find((entry) => entry.team_name === reviewTeam && entry.item_id === itemId);
     } else {
       photo = state.photos.find((entry) => entry.item_id === itemId);
     }
@@ -1188,6 +1342,19 @@
       image.onerror = () => reject(new Error("No se pudo leer la imagen."));
       image.src = url;
     });
+  }
+
+  function formatRelativeTime(value) {
+    const time = typeof value === "number" ? value : new Date(value).getTime();
+    if (!Number.isFinite(time)) return "";
+    const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+    if (seconds < 5) return "ahora";
+    if (seconds < 60) return `hace ${seconds}s`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `hace ${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `hace ${hours}h`;
+    return core.formatDate(value);
   }
 
   function slug(value) {
