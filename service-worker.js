@@ -1,4 +1,4 @@
-const CACHE_NAME = "equipos-fotos-v7";
+const CACHE_NAME = "equipos-fotos-v8";
 const APP_SHELL = [
   "./",
   "./index.html",
