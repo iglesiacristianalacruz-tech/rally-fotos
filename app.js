@@ -667,7 +667,7 @@
         const { data, error } = await supabase.from("photos").select("storage_path").eq("team_name", teamName);
         if (error) throw error;
         const paths = (data || []).map((photo) => photo.storage_path).filter(Boolean);
-        if (paths.length) await supabase.storage.from(bucket).remove(paths);
+        await removeStoragePaths(paths);
         const { error: deleteError } = await supabase.from("teams").delete().eq("name", teamName);
         if (deleteError) throw deleteError;
       },
@@ -699,12 +699,16 @@
           uploaded_at: new Date().toISOString()
         });
         if (error) {
-          await supabase.storage.from(bucket).remove([path]);
+          try {
+            await removeStoragePaths([path]);
+          } catch (cleanupError) {
+            throw new Error(`No se pudo registrar la foto ni limpiar storage: ${cleanupError.message || cleanupError}`);
+          }
           throw error;
         }
       },
       async deletePhoto(photo) {
-        if (photo.storage_path) await supabase.storage.from(bucket).remove([photo.storage_path]);
+        await removeStoragePaths([photo.storage_path]);
         const query = photo.id
           ? supabase.from("photos").delete().eq("id", photo.id)
           : supabase.from("photos").delete().eq("team_name", photo.team_name).eq("item_id", photo.item_id);
@@ -715,7 +719,7 @@
         const { data, error } = await supabase.from("photos").select("id,storage_path").eq("item_id", itemId);
         if (error) throw error;
         const paths = (data || []).map((photo) => photo.storage_path).filter(Boolean);
-        if (paths.length) await supabase.storage.from(bucket).remove(paths);
+        await removeStoragePaths(paths);
         const { error: deleteError } = await supabase.from("photos").delete().eq("item_id", itemId);
         if (deleteError) throw deleteError;
       },
@@ -757,6 +761,13 @@
       ...photo,
       previewUrl: supabase.storage.from(bucket).getPublicUrl(photo.storage_path).data.publicUrl
     }));
+  }
+
+  async function removeStoragePaths(paths) {
+    const cleanPaths = [...new Set(paths.filter(Boolean))];
+    if (!cleanPaths.length) return;
+    const { error } = await supabase.storage.from(bucket).remove(cleanPaths);
+    if (error) throw error;
   }
 
   function createDemoStore() {
