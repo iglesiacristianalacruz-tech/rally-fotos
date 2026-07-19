@@ -34,6 +34,7 @@
     teamPin: savedTeamPin,
     admin: sessionStorage.getItem("adminOk") === "1",
     selectedTeam: "",
+    loginTeam: "",
     items: [],
     photos: [],
     teams: [],
@@ -70,11 +71,15 @@
     if (!form) return;
     const action = form.dataset.action;
     if (action === "enter-team") {
-      const teamName = core.normalizeTeamName(new FormData(form).get("teamName"));
+      const teamName = core.normalizeTeamName(new FormData(form).get("teamName") || state.loginTeam);
       const pin = core.normalizePin(new FormData(form).get("teamPin"));
-      if (!teamName) return toast("Escribe el equipo.");
-      if (!pin) return toast("Escribe el PIN del equipo.");
+      if (!teamName) return toast("Elige tu equipo.");
+      if (!pin) {
+        openTeamPinModal(teamName);
+        return;
+      }
       run(async () => {
+        state.modal = null;
         await store.verifyTeamAccess(teamName, pin);
         localStorage.setItem("teamName", teamName);
         localStorage.setItem("teamPin", pin);
@@ -124,7 +129,7 @@
 
     if (action === "home") {
       state.mode = "home";
-      render();
+      run(loadHome, "Cargando equipos...");
     }
     if (action === "logout-team") {
       localStorage.removeItem("teamName");
@@ -132,17 +137,21 @@
       state.teamName = "";
       state.teamPin = "";
       state.mode = "home";
-      render();
+      run(loadHome, "Cargando equipos...");
     }
     if (action === "show-admin") {
       state.mode = state.admin ? "admin" : "admin-login";
       run(state.admin ? loadAdmin : async () => render(), state.admin ? "Cargando admin..." : "Cargando...");
     }
+    if (action === "select-login-team") {
+      state.loginTeam = core.normalizeTeamName(teamName);
+      render();
+    }
     if (action === "logout-admin") {
       sessionStorage.removeItem("adminOk");
       state.admin = false;
       state.mode = "home";
-      render();
+      run(loadHome, "Cargando equipos...");
     }
     if (action === "refresh-team") run(loadTeam, "Actualizando equipo...");
     if (action === "refresh-admin") run(loadAdmin, "Actualizando admin...");
@@ -212,7 +221,7 @@
 
   async function boot() {
     if (state.mode === "team") await run(loadTeam, "Cargando equipo...");
-    else render();
+    else await run(loadHome, "Cargando equipos...");
   }
 
   async function run(task, message = "Cargando...") {
@@ -238,6 +247,12 @@
     state.pending = await listPendingPhotos(state.teamName);
   }
 
+  async function loadHome() {
+    state.teams = await store.listPublicTeams();
+    if (state.loginTeam && !state.teams.some((team) => team.name === state.loginTeam)) state.loginTeam = "";
+    if (!state.loginTeam && state.teams.length === 1) state.loginTeam = state.teams[0].name;
+  }
+
   async function loadAdmin() {
     state.items = core.sortItems(await store.listItems());
     state.teams = await store.listTeams();
@@ -253,7 +268,17 @@
   }
 
   function renderHome() {
+    const teams = state.teams || [];
+    const teamOptions = teams.map((team) => {
+      const active = state.loginTeam === team.name;
+      return `
+        <button class="team-choice ${active ? "active" : ""}" type="button" data-action="select-login-team" data-team-name="${escapeAttr(team.name)}" aria-pressed="${active ? "true" : "false"}">
+          <span>${escapeHtml(team.name)}</span>
+        </button>
+      `;
+    }).join("");
     app.innerHTML = layout(`
+      <button class="admin-icon-button" type="button" data-action="show-admin" aria-label="Admin">⚙</button>
       <section class="panel login-panel poster-panel">
         <img class="hero-logo" src="assets/logo.png" alt="CAOS Camp 2">
         <p class="camp-label">CAOS CAMP 2</p>
@@ -264,21 +289,17 @@
           <p>Diviértanse y sean creativos.</p>
         </div>
         <form data-action="enter-team">
-          <div class="form-row">
-            <label for="teamName">Equipo</label>
-            <input id="teamName" name="teamName" autocomplete="off" placeholder="Equipo 1">
+          <input type="hidden" name="teamName" value="${escapeAttr(state.loginTeam)}">
+          <div class="team-choice-wrap">
+            <p class="form-label">Elige tu equipo</p>
+            <div class="team-choice-grid">
+              ${teamOptions || `<p class="muted empty-teams">Aun no hay equipos creados. Pide al admin que los agregue.</p>`}
+            </div>
           </div>
           <div class="form-row">
-            <label for="teamPin">PIN del equipo</label>
-            <input id="teamPin" name="teamPin" inputmode="numeric" type="password" autocomplete="off" placeholder="PIN">
-          </div>
-          <div class="form-row">
-            <button class="primary" type="submit" ${disabled()}>Entrar</button>
+            <button class="primary" type="submit" ${disabled()} ${teams.length ? "" : "disabled"}>Entrar</button>
           </div>
         </form>
-        <div class="form-row">
-          <button class="secondary" type="button" data-action="show-admin" ${disabled()}>Admin</button>
-        </div>
         <p class="muted small">${hasRemote ? "Online" : "Modo demo local"}</p>
       </section>
     `);
@@ -532,6 +553,27 @@
         </div>
       `;
     }
+    if (state.modal.type === "teamPin") {
+      return `
+        <div class="modal-backdrop open" data-action="close-modal">
+          <section class="panel modal" role="dialog" aria-modal="true">
+            <h2>${escapeHtml(state.modal.teamName)}</h2>
+            <p class="modal-copy">Ingresa el PIN de tu equipo para continuar.</p>
+            <form data-action="enter-team">
+              <input type="hidden" name="teamName" value="${escapeAttr(state.modal.teamName)}">
+              <div class="form-row">
+                <label for="teamAccessPin">PIN del equipo</label>
+                <input id="teamAccessPin" name="teamPin" inputmode="numeric" type="password" autocomplete="off" placeholder="PIN" autofocus>
+              </div>
+              <div class="modal-actions">
+                <button class="ghost" type="button" data-action="close-modal">Cancelar</button>
+                <button class="primary" type="submit" ${disabled()}>Entrar</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      `;
+    }
     if (state.modal.type === "confirm") {
       return `
         <div class="modal-backdrop open" data-action="close-modal">
@@ -576,6 +618,12 @@
     }
     if (!photo || !photo.previewUrl) return;
     state.modal = { type: "photo", url: photo.previewUrl, title: item ? item.title : "Foto" };
+    render();
+  }
+
+  function openTeamPinModal(teamName) {
+    state.loginTeam = core.normalizeTeamName(teamName);
+    state.modal = { type: "teamPin", teamName: state.loginTeam };
     render();
   }
 
@@ -740,6 +788,11 @@
 
   function createRemoteStore() {
     return {
+      async listPublicTeams() {
+        const { data, error } = await supabase.from("teams").select("name").order("name", { ascending: true });
+        if (error) throw error;
+        return data || [];
+      },
       async listItems() {
         const { data, error } = await supabase.from("items").select("*").order("position", { ascending: true });
         if (error) throw error;
@@ -888,6 +941,9 @@
 
   function createDemoStore() {
     return {
+      async listPublicTeams() {
+        return getDemoTeams().map((team) => ({ name: team.name }));
+      },
       async listItems() {
         return getDemoItems();
       },

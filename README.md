@@ -45,7 +45,7 @@ alter table public.teams add column if not exists pin text not null default '';
 ## Uso
 
 - Admin: crea cada equipo y asigna su PIN.
-- Equipo: entra con nombre de equipo y PIN.
+- Equipo: elige su equipo de la lista y entra con su PIN.
 - Equipo con internet: toma foto y se sube.
 - Equipo sin internet: toma foto, queda guardada en ese celular y luego toca `Subir guardadas`.
 - Admin: entra con PIN, selecciona equipo, ve previews y puede borrar fotos.
@@ -63,4 +63,5 @@ Sirve para un evento interno/controlado. Para uso publico, mueve las acciones ad
 ```bash
 node self-check.js
 node --check app.js
+node --check service-worker.js
 ```
